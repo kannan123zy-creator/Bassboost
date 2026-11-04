@@ -1,0 +1,32 @@
+name: Build APK
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: unzip -q BassBoostApp*.zip
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Download Spotify SDK
+        working-directory: BassBoostApp
+        run: curl -fL -o app/libs/spotify-app-remote-release-0.8.0.aar "https://github.com/spotify/android-sdk/releases/download/v0.8.0-appremote_v2.1.0-auth/spotify-app-remote-release-0.8.0.aar"
+      - name: Set Spotify Client ID (optional secret)
+        working-directory: BassBoostApp
+        env:
+          CID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+        run: if [ -n "$CID" ]; then sed -i "s/YOUR_SPOTIFY_CLIENT_ID/$CID/" app/src/main/java/com/example/bassboost/SpotifyManager.kt; fi
+      - name: Build
+        working-directory: BassBoostApp
+        run: gradle assembleDebug
+      - name: Show SHA-1 for Spotify dashboard
+        run: keytool -list -v -keystore BassBoostApp/app/debug.keystore -storepass android | grep SHA1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BassBoost-apk
+          path: BassBoostApp/app/build/outputs/apk/debug/app-debug.apk
