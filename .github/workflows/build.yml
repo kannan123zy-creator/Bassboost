@@ -1,32 +1,64 @@
+
 name: Build APK
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'BassBoostApp.zip'
+      - '.github/workflows/build.yml'
+
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - run: unzip -q BassBoostApp*.zip
-      - uses: actions/setup-java@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-      - uses: gradle/actions/setup-gradle@v4
+          java-version: '17'
+
+      - name: Extract Android project
+        shell: bash
+        run: |
+          set -e
+          mkdir -p extracted
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname 'BassBoostApp*.zip' -print -quit)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: BassBoostApp ZIP not found in repository root."
+            exit 1
+          fi
+
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "Checking extracted files..."
+          find extracted -maxdepth 4 -type f | head -80
+
+          WRAPPER=$(find extracted -type f -name gradlew -print -quit)
+
+          if [ -z "$WRAPPER" ]; then
+            echo "ERROR: Gradle wrapper (gradlew) not found in ZIP."
+            echo "Check that the ZIP contains the Android project."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$(dirname "$WRAPPER")" >> "$GITHUB_ENV"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          cd "$PROJECT_DIR"
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
-          gradle-version: "8.9"
-      - name: Download Spotify SDK
-        working-directory: BassBoostApp
-        run: curl -fL -o app/libs/spotify-app-remote-release-0.8.0.aar "https://github.com/spotify/android-sdk/releases/download/v0.8.0-appremote_v2.1.0-auth/spotify-app-remote-release-0.8.0.aar"
-      - name: Set Spotify Client ID (optional secret)
-        working-directory: BassBoostApp
-        env:
-          CID: ${{ secrets.SPOTIFY_CLIENT_ID }}
-        run: if [ -n "$CID" ]; then sed -i "s/YOUR_SPOTIFY_CLIENT_ID/$CID/" app/src/main/java/com/example/bassboost/SpotifyManager.kt; fi
-      - name: Build
-        working-directory: BassBoostApp
-        run: gradle assembleDebug
-      - name: Show SHA-1 for Spotify dashboard
-        run: keytool -list -v -keystore BassBoostApp/app/debug.keystore -storepass android | grep SHA1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: BassBoost-apk
-          path: BassBoostApp/app/build/outputs/apk/debug/app-debug.apk
+          name: BassBoost-debug-APK
+          path: extracted/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
